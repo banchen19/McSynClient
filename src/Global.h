@@ -1,7 +1,6 @@
 #pragma once
-#include <ll/api/Logger.h>
-// #include <include_all.h>
+#include <include_all.h>
 
-#define PLUGIN_NAME "plugin"
+#define PLUGIN_NAME "McSynClient"
 
 extern ll::Logger logger;

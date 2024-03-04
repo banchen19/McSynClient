@@ -1,4 +1,4 @@
-add_rules("mode.debug", "mode.release")
+add_rules("mode.debug", "mode.release", "mode.releasedbg")
 
 add_repositories("liteldev-repo https://github.com/LiteLDev/xmake-repo.git")
 
@@ -7,8 +7,9 @@ if not has_config("vs_runtime") then
 end
 
 -- Option 1: Use the latest version of LeviLamina released on GitHub.
-add_requires("levilamina")
-
+add_requires("levilamina",
+    "lightwebsocketclient")
+add_requires("cpp-httplib v0.14.0", {configs={ssl=true, zlib=true}})
 -- Option 2: Use a specific version of LeviLamina released on GitHub.
 -- add_requires("levilamina x.x.x")
 
@@ -40,35 +41,35 @@ add_requires("levilamina")
 --         import("package.tools.xmake").install(package)
 --     end)
 
-target("GMLIB-Plugin-Template") -- Change this to your plugin name.
+target("McSynClient") -- Change this to your plugin name.
     add_cxflags(
         "/EHa",
         "/utf-8"
     )
     add_defines(
-        "NOMINMAX",
-        "UNICODE"
+        "_HAS_CXX23=1", -- To enable C++23 features
+                "CPPHTTPLIB_OPENSSL_SUPPORT" -- To enable SSL support for cpp-httplib.
     )
     add_files(
         "src/**.cpp"
     )
     add_links(
-        "SDK-GMLIB/Lib/GMLIB"
-    )
+        "SDK-GMLIB/Lib/GMLIB")
     add_includedirs(
         "SDK-GMLIB",
         "src"
     )
     add_packages(
-        "levilamina"
+        "cpp-httplib",
+        "levilamina",
+        "lightwebsocketclient"
     )
     add_shflags(
         "/DELAYLOAD:bedrock_server.dll" -- Magic to import symbols from BDS
     )
     set_exceptions("none") -- To avoid conflicts with /EHa
     set_kind("shared")
-    set_languages("c++23")
-    set_symbols("debug")
+    set_languages("cxx23")
 
     after_build(function (target)
         local plugin_packer = import("scripts.after_build")
