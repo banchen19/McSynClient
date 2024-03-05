@@ -76,12 +76,13 @@ void periodicTask(string ws, string server_name) {
             json messageData = jsonData["message"];
 
             // 获取 message 下的数据
-            auto data   = messageData["data"];
-            auto name   = messageData["name"];
-            auto server = messageData["server"];
+            std::string data   = messageData["data"];
+            std::string name   = messageData["name"];
+            std::string server = messageData["server"];
+            const auto chat_data="§f["+server+"]<"+name+"> "+data;
             if (server_name != server) {
                 auto* level = GMLIB_Level::getLevel();
-                level->broadcast(data);
+                level->broadcast(chat_data);
             }
 
         } catch (const std::exception& e) {
