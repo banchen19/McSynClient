@@ -76,10 +76,10 @@ void periodicTask(string ws, string server_name) {
             json messageData = jsonData["message"];
 
             // 获取 message 下的数据
-            std::string data   = messageData["data"];
-            std::string name   = messageData["name"];
-            std::string server = messageData["server"];
-            const auto chat_data="§f["+server+"]<"+name+"> "+data;
+            std::string data      = messageData["data"];
+            std::string name      = messageData["name"];
+            std::string server    = messageData["server"];
+            const auto  chat_data = "§f[" + server + "]<" + name + "> " + data;
             if (server_name != server) {
                 auto* level = GMLIB_Level::getLevel();
                 level->broadcast(chat_data);
@@ -107,34 +107,46 @@ void periodicTask(string ws, string server_name) {
 
 void get_players(string ip) {
 
+    GMLIB::Server::FakeList::removeAllFakeLists();
     auto            level = ll::service::getLevel();
-    httplib::Client cli(ip);
-    auto            res = cli.Get("/get");
-    res->status;
-    res->body; // 返回数据为 ["banchen21"]
+    httplib::Client cli(ip.c_str());
+    auto            res = cli.Get("/api/game/pe/player/get");
+    if (res && res->status == 200 && level.has_value()) {
+        try {
+            json                     players_data = json::parse(res->body);
+            std::vector<std::string> all_player_names1;
 
-    if (level.has_value()) {
-        httplib::Client cli(ip.c_str()); 
-        auto            res = cli.Get("/get");
-
-        if (res && res->status == 200) {
-            try {
-                json players_data = json::parse(res->body);
-                GMLIB::Server::FakeList::removeAllFakeLists();
-                for (const auto& player_name : players_data) {
-                    level->forEachPlayer([&, player_name = player_name](Player& player) {
-                        if (player.getName() != player_name) {
-                            GMLIB::Server::FakeList::addFakeList(player_name, "", ActorUniqueID());
-                            std::cout << "Added to FakeList: " << player_name << std::endl;
-                        }
-                        return true; // 返回 true 继续遍历，false 停止遍历
-                    });
-                }
-            } catch (const std::exception& e) {
-                std::cerr << "JSON parsing error: " << e.what() << std::endl;
+            for (const auto& player_name : players_data) {
+                all_player_names1.push_back(player_name);
             }
-        } else {
-            std::cerr << "HTTP request failed. Status: " << (res ? res->status : -1) << std::endl;
+
+            std::vector<std::string> all_player_names2;
+            level->forEachPlayer([&](Player& player) {
+                std::string player_name = player.getName();
+                all_player_names2.push_back(player_name);
+                return true; // 返回 true 继续遍历，false 停止遍历
+            });
+            // 排序两个集合
+            std::sort(all_player_names1.begin(), all_player_names1.end());
+            std::sort(all_player_names2.begin(), all_player_names2.end());
+
+            // 创建一个用于存储差异元素的新数组
+            std::vector<std::string> difference;
+
+            // 使用 set_difference 算法找到两个集合的差异元素
+            std::set_difference(
+                all_player_names1.begin(),
+                all_player_names1.end(),
+                all_player_names2.begin(),
+                all_player_names2.end(),
+                std::back_inserter(difference)
+            );
+
+            for (const auto& name : difference) {
+                GMLIB::Server::FakeList::addFakeList(name, "002", ActorUniqueID());
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "JSON parsing error: " << e.what() << std::endl;
         }
     }
 }
@@ -173,6 +185,7 @@ auto enable(ll::plugin::NativePlugin& self) -> bool {
     playerJoinEventListener = eventBus.emplaceListener<ll::event::player::PlayerJoinEvent>(
         [&logger, server_name = config.server_name, &self](ll::event::player::PlayerJoinEvent& event) {
             auto& player = event.self();
+            http_post(player.getName(), server_name, "§e 玩家加入游戏", "/chat");
             http_post(player.getName(), server_name, "", "/join");
         }
     );
@@ -181,6 +194,7 @@ auto enable(ll::plugin::NativePlugin& self) -> bool {
     player_life_game_Listener = eventBus.emplaceListener<ll::event::player::PlayerLeaveEvent>(
         [&logger, server_name = config.server_name, &self](ll::event::player::PlayerLeaveEvent& event) {
             auto& player = event.self();
+            http_post(player.getName(), server_name, "§e 玩家退出游戏", "/chat");
             http_post(player.getName(), server_name, "", "/left");
         }
     );
