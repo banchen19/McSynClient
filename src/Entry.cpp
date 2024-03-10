@@ -61,9 +61,12 @@ auto                                                              disable(ll::pl
 }
 void periodicTask(string ws, string server_name) {
 
-    const string ws_uri = ws + "/?server_name=" + server_name;
+    // const string ws_uri = "ws://127.0.0.1:2000/api/pe/ws?server_name=fds%E5%8D%81%E5%A4%A7";
+
+    const string ws_uri = ws + "/api/pe/ws?server_name=" + server_name;
     try {
         client.Connect(ws_uri);
+        cout << "Ws连接成功" << endl;
     } catch (const std::exception& ex) {
         cout << ex.what() << endl;
     }
@@ -72,13 +75,10 @@ void periodicTask(string ws, string server_name) {
             // 解析 JSON 字符串
             json jsonData = json::parse(text);
 
-            // 获取 message 字段
-            json messageData = jsonData["message"];
-
             // 获取 message 下的数据
-            std::string data      = messageData["data"];
-            std::string name      = messageData["name"];
-            std::string server    = messageData["server"];
+            std::string data      = jsonData["data"];
+            std::string name      = jsonData["name"];
+            std::string server    = jsonData["server"];
             const auto  chat_data = "§f[" + server + "]<" + name + "> " + data;
             if (server_name != server) {
                 auto* level = GMLIB_Level::getLevel();
@@ -110,7 +110,7 @@ void get_players(string ip) {
     GMLIB::Server::FakeList::removeAllFakeLists();
     auto            level = ll::service::getLevel();
     httplib::Client cli(ip.c_str());
-    auto            res = cli.Get("/api/game/pe/player/get");
+    auto            res = cli.Get("/api/pe/player/get");
     if (res && res->status == 200 && level.has_value()) {
         try {
             json                     players_data = json::parse(res->body);
@@ -166,7 +166,10 @@ void http_post(string name, string server, string data, string post_url) {
     httplib::Headers headers = {
         {"content-type", "application/json"}
     };
-    auto response = client.Post("/api/game/pe/player" + post_url, headers, jsonString, "application/json");
+    auto res = client.Post("/api/pe/player" + post_url, headers, jsonString, "application/json");
+    if (res && res->status != 200) {
+        client.Post("/api/pe/player" + post_url, headers, jsonString, "application/json");
+    }
 }
 
 auto enable(ll::plugin::NativePlugin& self) -> bool {
