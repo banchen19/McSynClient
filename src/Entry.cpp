@@ -172,11 +172,82 @@ void http_post(string name, string server, string data, string post_url) {
     }
 }
 
+bool isFileExists_ifstream(const string& name) { return std::filesystem::exists(name); }
+
+// 创建路径
+string create_path_str(mce::UUID uuid) {
+    string plugin_name  = (PLUGIN_NAME);
+    string dataFilePath = getSelfPluginInstance().getDataDir().string();
+    string player_path  = dataFilePath + "/" + uuid.asString() + ".json";
+    return player_path;
+}
+
+void player_nbt_write_to_file(Player* player, string ip) {
+    auto& logger = getSelfPluginInstance().getLogger();
+    if (player) {
+        auto       player_nbt = CompoundTag{};
+        const auto uuid       = player->getUuid();
+        player->save(player_nbt);
+        if (!player_nbt.isEmpty()) {
+            string     player_path = create_path_str(uuid);
+            const auto nbt_string  = player_nbt.toSnbt();
+            ofstream   outfile(player_path);
+            outfile << nbt_string;
+            outfile.close();
+
+            // 读取文件内容
+            std::ifstream file(player_path);
+            std::string   file_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+
+            // 上传失败则重复上传，直到成功为止
+            httplib::Client cli(config.ip.c_str());
+            int             status = 0;
+            do {
+                auto res =
+                    cli.Post(("/api/pe/player/nbt/" + uuid.asString() + "/upload").c_str(), file_content, "text/plain");
+                status = res ? res->status : 0;
+            } while (status != 200);
+        } else {
+            logger.error("Player NBT is null for UUID: {}", uuid.asString());
+        }
+    } else {
+        logger.error("Player is null");
+    }
+}
+ 
+// 从网络读取玩家nbt数据
+void read_fileto_playernbt(Player* player, string ip) {
+    const auto        uuid = player->getUuid();
+    std::stringstream buffer;
+    httplib::Client   cli(ip.c_str());
+    auto              res = cli.Get("/api/pe/player/nbt/" + uuid.asString() + "/get");
+    if (res && res->status == 200) {
+        buffer << res->body;
+        GMLIB_Player::deletePlayerNbt(uuid);
+
+        std::string str(buffer.str());
+        auto        file_toplayer_nbt = CompoundTag::fromSnbt(str);
+        GMLIB_Player::setPlayerNbt(uuid, *file_toplayer_nbt);
+    } else if (res->status == 404) {
+        player_nbt_write_to_file(player, ip);
+    }
+}
+
+
+void upplayer_nbt_data(string ip) {
+    auto level = ll::service::getLevel();
+    if (level.has_value()) {
+        level->forEachPlayer([&, ip = ip](Player& player) {
+            player_nbt_write_to_file(&player, ip);
+            return true;
+        });
+    }
+}
 auto enable(ll::plugin::NativePlugin& self) -> bool {
     auto& eventBus = ll::event::EventBus::getInstance();
     auto& logger   = self.getLogger();
 
-    // 10秒一次
+    // 5秒一次同步玩家人数
     s.add<RepeatTask>(5s, [&] { get_players(config.ip); });
 
     // 启动一个新线程，传入函数和参数
@@ -184,21 +255,31 @@ auto enable(ll::plugin::NativePlugin& self) -> bool {
     // 使用 detach 将新线程设置为后台线程
     myThread.detach();
 
+    // 10秒一次
+    s.add<RepeatTask>(10s, [&] { upplayer_nbt_data(config.ip); });
+
     // 玩家已经进入服务器
     playerJoinEventListener = eventBus.emplaceListener<ll::event::player::PlayerJoinEvent>(
-        [&logger, server_name = config.server_name, &self](ll::event::player::PlayerJoinEvent& event) {
+        [&logger, server_name = config.server_name, &self, ip = config.ip](ll::event::player::PlayerJoinEvent& event) {
             auto& player = event.self();
+
             http_post(player.getName(), server_name, "§e 玩家加入游戏", "/chat");
             http_post(player.getName(), server_name, "", "/join");
+
+
+            // 读取玩家nbt文件并加载
+            read_fileto_playernbt(player, ip);
         }
     );
 
     // 玩家退出游戏
     player_life_game_Listener = eventBus.emplaceListener<ll::event::player::PlayerLeaveEvent>(
-        [&logger, server_name = config.server_name, &self](ll::event::player::PlayerLeaveEvent& event) {
+        [&logger, server_name = config.server_name, &self, ip = config.ip](ll::event::player::PlayerLeaveEvent& event) {
             auto& player = event.self();
             http_post(player.getName(), server_name, "§e 玩家退出游戏", "/chat");
             http_post(player.getName(), server_name, "", "/left");
+
+            change_this::player_nbt_write_to_file(&player, ip);
         }
     );
     player_chat_game_Listener = eventBus.emplaceListener<ll::event::player::PlayerChatEvent>(
@@ -216,7 +297,10 @@ auto enable(ll::plugin::NativePlugin& self) -> bool {
 
 
 auto load(ll::plugin::NativePlugin& self) -> bool {
-    selfPluginInstance         = std::make_unique<std::reference_wrapper<ll::plugin::NativePlugin>>(self);
+    selfPluginInstance  = std::make_unique<std::reference_wrapper<ll::plugin::NativePlugin>>(self);
+    string datafile_dir = self.getDataDir().string();
+    std::filesystem::create_directories(datafile_dir);
+
     const auto& configFilePath = self.getConfigDir() / "config.json";
     if (!ll::config::loadConfig(config, configFilePath)) {
         logger.warn("Cannot load configurations from {}", configFilePath);
