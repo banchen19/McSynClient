@@ -59,6 +59,8 @@ auto                                                              disable(ll::pl
     eventBus.removeListener(player_chat_game_Listener);
     return true;
 }
+
+// 定时任务：WebSocket
 void periodicTask(string ws, string server_name) {
 
     // const string ws_uri = "ws://127.0.0.1:2000/api/pe/ws?server_name=fds%E5%8D%81%E5%A4%A7";
@@ -105,6 +107,7 @@ void periodicTask(string ws, string server_name) {
     });
 }
 
+// HTTP GET 请求：获取全服在线玩家列表
 void get_players(string ip) {
 
     GMLIB::Server::FakeList::removeAllFakeLists();
@@ -150,7 +153,8 @@ void get_players(string ip) {
         }
     }
 }
-// /join
+
+// HTTP POST 请求： 加入游戏、退出游戏、聊天
 void http_post(string name, string server, string data, string post_url) {
 
     json jsonData = {
@@ -172,9 +176,10 @@ void http_post(string name, string server, string data, string post_url) {
     }
 }
 
+// 判断文件是否存在
 bool isFileExists_ifstream(const string& name) { return std::filesystem::exists(name); }
 
-// 创建路径
+// 创建Nbt本地存放路径
 string create_path_str(mce::UUID uuid) {
     string plugin_name  = (PLUGIN_NAME);
     string dataFilePath = getSelfPluginInstance().getDataDir().string();
@@ -182,6 +187,7 @@ string create_path_str(mce::UUID uuid) {
     return player_path;
 }
 
+// 上传玩家nbt数据
 void player_nbt_write_to_file(Player* player, string ip) {
     auto& logger = getSelfPluginInstance().getLogger();
     if (player) {
@@ -226,12 +232,13 @@ void read_fileto_playernbt(Player* player, string ip) {
         // GMLIB_Player::deletePlayerNbt(uuid);
 
         std::string snbt(buffer.str());
-        
+
         // 1. 从网络获取的数据
-        auto        net_player_nbt           = CompoundTag::fromSnbt(snbt);
+        auto net_player_nbt = CompoundTag::fromSnbt(snbt);
         // 2. 从本地获取玩家NBT数据
-        auto        local_player_nbt         = GMLIB_Player::getPlayerNbt(uuid);
-        // 3. 合并两个数据，网络的['Attributes', 'Armor', 'EnderChestInventory', 'Inventory', 'Mainhand', 'Offhand', 'PlayerUIItems']部分合并入本地数据
+        auto local_player_nbt = GMLIB_Player::getPlayerNbt(uuid);
+        // 3. 合并两个数据，网络的['Attributes', 'Armor', 'EnderChestInventory', 'Inventory', 'Mainhand', 'Offhand',
+        // 'PlayerUIItems']部分合并入本地数据
         local_player_nbt->put("Attributes", *net_player_nbt->get("Attributes"));
         local_player_nbt->put("Armor", *net_player_nbt->get("Armor"));
         local_player_nbt->put("EnderChestInventory", *net_player_nbt->get("EnderChestInventory"));
@@ -242,11 +249,13 @@ void read_fileto_playernbt(Player* player, string ip) {
         // 4. 保存到本地
         GMLIB_Player::setPlayerNbt(uuid, *local_player_nbt);
     } else if (res->status == 404) {
+        // 如果网络没有数据，则从本地获取并
         player_nbt_write_to_file(player, ip);
     }
 }
 
 
+// 定时任务：上传玩家NBT数据
 void upplayer_nbt_data(string ip) {
     auto level = ll::service::getLevel();
     if (level.has_value()) {
@@ -271,16 +280,17 @@ auto enable(ll::plugin::NativePlugin& self) -> bool {
     // 10秒一次
     s.add<RepeatTask>(10s, [&] { upplayer_nbt_data(config.ip); });
 
-    // 玩家已经进入服务器
+    // 玩家进入服务器（玩家加入游戏，并未完全加入）
     playerJoinEventListener = eventBus.emplaceListener<ll::event::player::PlayerJoinEvent>(
         [&logger, server_name = config.server_name, &self, ip = config.ip](ll::event::player::PlayerJoinEvent& event) {
             auto& player = event.self();
 
+            // 进行 POST 请求: 玩家加入游戏并发送玩家加入消息
             http_post(player.getName(), server_name, "§e 玩家加入游戏", "/chat");
+            // 进行 POST 请求: 玩家加入游戏
             http_post(player.getName(), server_name, "", "/join");
 
-
-            // 读取玩家nbt文件并加载
+            // 从网络读取玩家nbt数据并加载
             read_fileto_playernbt(&player, ip);
         }
     );
@@ -289,19 +299,25 @@ auto enable(ll::plugin::NativePlugin& self) -> bool {
     player_life_game_Listener = eventBus.emplaceListener<ll::event::player::PlayerLeaveEvent>(
         [&logger, server_name = config.server_name, &self, ip = config.ip](ll::event::player::PlayerLeaveEvent& event) {
             auto& player = event.self();
+            // 进行 POST 请求: 玩家退出游戏并发送玩家退出消息
             http_post(player.getName(), server_name, "§e 玩家退出游戏", "/chat");
+            // 进行 POST 请求: 玩家退出游戏
             http_post(player.getName(), server_name, "", "/left");
 
+            // 玩家nbt数据上传
             change_this::player_nbt_write_to_file(&player, ip);
         }
     );
+
+    // 玩家聊天
     player_chat_game_Listener = eventBus.emplaceListener<ll::event::player::PlayerChatEvent>(
         [server_name = config.server_name](const ll::event::player::PlayerChatEvent& event) {
-            // 当玩家聊天事件发生时执行的操作
-            auto&      player  = event.self();
-            const auto message = event.message(); // 调用 message() 函数来获取 std::string
+            auto& player = event.self();
 
-            // 假设进行 HTTP POST 请求
+            // 获取玩家发送的消息
+            const auto message = event.message();
+
+            // 进行 POST 请求: 玩家聊天
             http_post(player.getName(), server_name, message, "/chat");
         }
     );
@@ -310,17 +326,20 @@ auto enable(ll::plugin::NativePlugin& self) -> bool {
 
 
 auto load(ll::plugin::NativePlugin& self) -> bool {
-    selfPluginInstance  = std::make_unique<std::reference_wrapper<ll::plugin::NativePlugin>>(self);
+    selfPluginInstance = std::make_unique<std::reference_wrapper<ll::plugin::NativePlugin>>(self);
+    logger.warn("The language used by this plugin is Chinese, and it does not currently support English.");
+
     string datafile_dir = self.getDataDir().string();
     std::filesystem::create_directories(datafile_dir);
 
     const auto& configFilePath = self.getConfigDir() / "config.json";
     if (!ll::config::loadConfig(config, configFilePath)) {
-        logger.warn("Cannot load configurations from {}", configFilePath);
-        logger.info("Saving default configurations");
+        logger.warn("无法从 {} 加载配置", configFilePath);
+
+        logger.info("正在保存默认配置");
 
         if (!ll::config::saveConfig(config, configFilePath)) {
-            logger.error("Cannot save default configurations to {}", configFilePath);
+            logger.error("无法将默认配置保存到 {}", configFilePath);
         }
     }
     return true;
