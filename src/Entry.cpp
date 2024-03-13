@@ -214,7 +214,7 @@ void player_nbt_write_to_file(Player* player, string ip) {
         logger.error("Player is null");
     }
 }
- 
+
 // 从网络读取玩家nbt数据
 void read_fileto_playernbt(Player* player, string ip) {
     const auto        uuid = player->getUuid();
@@ -223,11 +223,24 @@ void read_fileto_playernbt(Player* player, string ip) {
     auto              res = cli.Get("/api/pe/player/nbt/" + uuid.asString() + "/get");
     if (res && res->status == 200) {
         buffer << res->body;
-        GMLIB_Player::deletePlayerNbt(uuid);
+        // GMLIB_Player::deletePlayerNbt(uuid);
 
-        std::string str(buffer.str());
-        auto        file_toplayer_nbt = CompoundTag::fromSnbt(str);
-        GMLIB_Player::setPlayerNbt(uuid, *file_toplayer_nbt);
+        std::string snbt(buffer.str());
+        
+        // 1. 从网络获取的数据
+        auto        net_player_nbt           = CompoundTag::fromSnbt(snbt);
+        // 2. 从本地获取玩家NBT数据
+        auto        local_player_nbt         = GMLIB_Player::getPlayerNbt(uuid);
+        // 3. 合并两个数据，网络的['Attributes', 'Armor', 'EnderChestInventory', 'Inventory', 'Mainhand', 'Offhand', 'PlayerUIItems']部分合并入本地数据
+        local_player_nbt->put("Attributes", *net_player_nbt->get("Attributes"));
+        local_player_nbt->put("Armor", *net_player_nbt->get("Armor"));
+        local_player_nbt->put("EnderChestInventory", *net_player_nbt->get("EnderChestInventory"));
+        local_player_nbt->put("Inventory", *net_player_nbt->get("Inventory"));
+        local_player_nbt->put("Mainhand", *net_player_nbt->get("Mainhand"));
+        local_player_nbt->put("Offhand", *net_player_nbt->get("Offhand"));
+        local_player_nbt->put("PlayerUIItems", *net_player_nbt->get("PlayerUIItems"));
+        // 4. 保存到本地
+        GMLIB_Player::setPlayerNbt(uuid, *local_player_nbt);
     } else if (res->status == 404) {
         player_nbt_write_to_file(player, ip);
     }
@@ -268,7 +281,7 @@ auto enable(ll::plugin::NativePlugin& self) -> bool {
 
 
             // 读取玩家nbt文件并加载
-            read_fileto_playernbt(player, ip);
+            read_fileto_playernbt(&player, ip);
         }
     );
 
